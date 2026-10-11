@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weekly Availability</title>
+<style>
+  :root {
+    --bg: #f6f3ee;
+    --card: #ffffff;
+    --ink: #1f1d1a;
+    --muted: #6b655c;
+    --line: #ddd6ca;
+    --accent: #b3261e;
+    --accent-ink: #ffffff;
+    --ok: #1e6b3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171512;
+      --card: #211e1a;
+      --ink: #f1ede6;
+      --muted: #a39b8e;
+      --line: #3a352e;
+      --accent: #e0554c;
+      --accent-ink: #1a0504;
+      --ok: #6fcf8f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input[type=text], select {
+    width: 100%;
+    padding: 12px;
+    font: inherit;
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  input:focus, select:focus, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .day {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 12px;
+  }
+  .day h2 { font-size: 1.05rem; margin: 0; }
+  .hours { color: var(--muted); font-size: 0.875rem; margin: 2px 0 12px; }
+  .day select { margin-bottom: 8px; }
+  .closed { color: var(--muted); text-align: center; margin-top: 12px; font-size: 0.9rem; }
+  button {
+    width: 100%;
+    margin-top: 20px;
+    padding: 14px;
+    font: inherit;
+    font-weight: 700;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+  #status { margin-top: 14px; text-align: center; font-weight: 600; min-height: 1.5em; }
+  #status.ok { color: var(--ok); }
+  #status.err { color: var(--accent); }
+  .hp { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Weekly Availability</h1>
+  <p class="sub">For the week of <strong id="weekLabel"></strong>. Submit by Sunday evening. If you need to change something, just submit again and your latest entry is the one that counts.</p>
+
+  <form id="form" novalidate>
+    <label for="name">Your name</label>
+    <input type="text" id="name" name="name" autocomplete="name" required placeholder="First and last name">
+
+    <!-- hidden field real people never fill in; catches basic spam bots -->
+    <input type="text" class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+
+    <p class="closed">Closed Monday</p>
+    <div id="days"></div>
+
+    <button type="submit" id="submitBtn">Submit availability</button>
+    <p id="status" role="status"></p>
+  </form>
+</main>
+
+<script>
+  // ====== PASTE YOUR APPS SCRIPT WEB APP URL HERE ======
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby6JvCQgpV4TBr4-b9ywn6BAsp29csDTQNAr_lQlvCmGkFm5mbrr6YlXEBYqrk0yIOJ/exec";
+  // ====================================================
+
+  const DAYS = [
+    { key: "tue", name: "Tuesday",   morning: "9:00am – 4:00pm",  evening: "4:00pm – close" },
+    { key: "wed", name: "Wednesday", morning: "10:00am – 4:00pm", evening: "4:00pm – close" },
+    { key: "thu", name: "Thursday",  morning: "10:00am – 4:00pm", evening: "4:00pm – close" },
+    { key: "fri", name: "Friday",    morning: "10:00am – 3:30pm", evening: "3:30pm – close" },
+    { key: "sat", name: "Saturday",  morning: "10:00am – 4:00pm", evening: "4:00pm – close" },
+    { key: "sun", name: "Sunday",    morning: "10:00am – 3:00pm", evening: "3:00pm – close" }
+  ];
+
+  // Build the day cards
+  const daysEl = document.getElementById("days");
+  DAYS.forEach(d => {
+    const div = document.createElement("div");
+    div.className = "day";
+    div.innerHTML = `
+      <h2>${d.name}</h2>
+      <p class="hours">Morning ${d.morning} · Evening ${d.evening}</p>
+      <label for="${d.key}" class="hp">${d.name} availability</label>
+      <select id="${d.key}" name="${d.key}" aria-label="${d.name} availability">
+        <option value="off">Not available</option>
+        <option value="morning">Morning only</option>
+        <option value="evening">Evening only</option>
+        <option value="both">Either shift</option>
+        <option value="specific times">Specific times (write below)</option>
+      </select>
+      <input type="text" name="${d.key}_note" aria-label="${d.name} reason or times"
+             placeholder="Reason or specific times (optional)" maxlength="200">`;
+    daysEl.appendChild(div);
+  });
+
+  // "Week of" = the next Tuesday after today
+  function upcomingTuesday() {
+    const d = new Date();
+    let add = (2 - d.getDay() + 7) % 7;
+    if (add === 0) add = 7;
+    d.setDate(d.getDate() + add);
+    return d;
+  }
+  const weekOf = upcomingTuesday();
+  const weekStr = weekOf.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  document.getElementById("weekLabel").textContent = "Tuesday, " + weekStr;
+
+  const form = document.getElementById("form");
+  const statusEl = document.getElementById("status");
+  const btn = document.getElementById("submitBtn");
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = cls || "";
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    if (fd.get("website")) return; // bot filled the hidden field
+
+    const name = (fd.get("name") || "").trim();
+    if (!name) { setStatus("Please enter your name.", "err"); return; }
+
+    for (const d of DAYS) {
+      if (fd.get(d.key) === "specific times" && !(fd.get(d.key + "_note") || "").trim()) {
+        setStatus(`Please write your times for ${d.name}.`, "err");
+        return;
+      }
+    }
+
+    const data = { name, week_of: weekStr };
+    DAYS.forEach(d => {
+      data[d.key] = fd.get(d.key);
+      data[d.key + "_note"] = (fd.get(d.key + "_note") || "").trim();
+    });
+
+    btn.disabled = true;
+    setStatus("Sending...");
+    try {
+      // no-cors: the browser can't read Google's reply, but the row is still written.
+      await fetch(SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(data)
+      });
+      form.reset();
+      setStatus("Got it, thanks " + name.split(" ")[0] + "! Your availability was submitted.", "ok");
+    } catch (err) {
+      setStatus("Couldn't send. Check your connection and try again.", "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
